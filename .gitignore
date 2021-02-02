@@ -2,6 +2,9 @@
 .idea
 .vscode
 
+# quick start generate fold
+quick_start/
+
 # Mac files
 .DS_Store
 
