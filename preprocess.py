@@ -58,42 +58,44 @@ def process_wav(path: Path):
 wav_files = get_files(path, extension)
 paths = Paths(hp.data_path, hp.voc_model_id, hp.tts_model_id)
 
-print(f'\n{len(wav_files)} {extension[1:]} files found in "{path}"\n')
+if __name__ == '__main__':
 
-if len(wav_files) == 0:
+    print(f'\n{len(wav_files)} {extension[1:]} files found in "{path}"\n')
 
-    print('Please point wav_path in hparams.py to your dataset,')
-    print('or use the --path option.\n')
+    if len(wav_files) == 0:
 
-else:
+        print('Please point wav_path in hparams.py to your dataset,')
+        print('or use the --path option.\n')
 
-    if not hp.ignore_tts:
+    else:
 
-        text_dict = ljspeech(path)
+        if not hp.ignore_tts:
 
-        with open(paths.data/'text_dict.pkl', 'wb') as f:
-            pickle.dump(text_dict, f)
+            text_dict = ljspeech(path)
 
-    n_workers = max(1, args.num_workers)
+            with open(paths.data/'text_dict.pkl', 'wb') as f:
+                pickle.dump(text_dict, f)
 
-    simple_table([
-        ('Sample Rate', hp.sample_rate),
-        ('Bit Depth', hp.bits),
-        ('Mu Law', hp.mu_law),
-        ('Hop Length', hp.hop_length),
-        ('CPU Usage', f'{n_workers}/{cpu_count()}')
-    ])
+        n_workers = max(1, args.num_workers)
 
-    pool = Pool(processes=n_workers)
-    dataset = []
+        simple_table([
+            ('Sample Rate', hp.sample_rate),
+            ('Bit Depth', hp.bits),
+            ('Mu Law', hp.mu_law),
+            ('Hop Length', hp.hop_length),
+            ('CPU Usage', f'{n_workers}/{cpu_count()}')
+        ])
 
-    for i, (item_id, length) in enumerate(pool.imap_unordered(process_wav, wav_files), 1):
-        dataset += [(item_id, length)]
-        bar = progbar(i, len(wav_files))
-        message = f'{bar} {i}/{len(wav_files)} '
-        stream(message)
+        pool = Pool(processes=n_workers)
+        dataset = []
 
-    with open(paths.data/'dataset.pkl', 'wb') as f:
-        pickle.dump(dataset, f)
+        for i, (item_id, length) in enumerate(pool.imap_unordered(process_wav, wav_files), 1):
+            dataset += [(item_id, length)]
+            bar = progbar(i, len(wav_files))
+            message = f'{bar} {i}/{len(wav_files)} '
+            stream(message)
 
-    print('\n\nCompleted. Ready to run "python train_tacotron.py" or "python train_wavernn.py". \n')
+        with open(paths.data/'dataset.pkl', 'wb') as f:
+            pickle.dump(dataset, f)
+
+        print('\n\nCompleted. Ready to run "python train_tacotron.py" or "python train_wavernn.py". \n')

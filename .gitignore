@@ -4,6 +4,8 @@
 
 # quick start generate fold
 quick_start/
+LJSpeech-1.1/
+data/
 
 # Mac files
 .DS_Store
