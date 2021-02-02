@@ -59,7 +59,10 @@ def main():
                      postnet_K=hp.tts_postnet_K,
                      num_highways=hp.tts_num_highways,
                      dropout=hp.tts_dropout,
-                     stop_threshold=hp.tts_stop_threshold).to(device)
+                     stop_threshold=hp.tts_stop_threshold,
+                     att_type=hp.tts_att_type,
+                     gmm_k=hp.tts_att_gmm_k,
+                     ).to(device)
 
     optimizer = optim.Adam(model.parameters())
     restore_checkpoint('tts', paths, model, optimizer, create_if_missing=True)

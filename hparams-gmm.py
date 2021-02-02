@@ -8,7 +8,7 @@ data_path = 'data/'
 # model ids are separate - that way you can use a new tts with an old wavernn and vice versa
 # NB: expect undefined behaviour if models were trained on different DSP settings
 voc_model_id = 'ljspeech_mol'
-tts_model_id = 'ljspeech_lsa_smooth_attention'
+tts_model_id = 'ljspeech_gmm_attention'
 
 # set this to True if you are only interested in WaveRNN
 ignore_tts = False
@@ -92,7 +92,7 @@ tts_clip_grad_norm = 1.0            # clips the gradient norm to prevent explosi
 tts_checkpoint_every = 2_000        # checkpoints the model every X steps
 # TODO: tts_phoneme_prob = 0.0              # [0 <-> 1] probability for feeding model phonemes vrs graphemes
 
-tts_att_type = 'lsa'        # 'lsa' or 'gmm'
+tts_att_type = 'gmm'        # 'lsa' or 'gmm'
 tts_att_gmm_k = 16          # 只有在 tts_att_type = 'gmm' 时，才会起作用
 # ------------------------------------------------------------------------------------------------------------------#
 

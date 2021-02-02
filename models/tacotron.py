@@ -205,16 +205,115 @@ class LSA(nn.Module):
         return scores.unsqueeze(-1).transpose(1, 2)
 
 
+# https://github.com/mozilla/TTS/blob/master/TTS/tts/layers/attentions.py#L43
+class GravesAttention(nn.Module):
+    """Graves Attention as is ref1 with updates from ref2.
+    ref1: https://arxiv.org/abs/1910.10288
+    ref2: https://arxiv.org/pdf/1906.01083.pdf
+    Args:
+        query_dim (int): number of channels in query tensor.
+        K (int): number of Gaussian heads to be used for computing attention.
+    """
+    COEF = 0.3989422917366028  # numpy.sqrt(1/(2*numpy.pi))
+
+    def __init__(self, query_dim, K):
+
+        super(GravesAttention, self).__init__()
+        self._mask_value = 1e-8
+        self.K = K
+        # self.attention_alignment = 0.05
+        self.eps = 1e-5
+        self.J = None
+        self.N_a = nn.Sequential(
+            nn.Linear(query_dim, query_dim, bias=True),
+            nn.ReLU(),
+            nn.Linear(query_dim, 3*K, bias=True))
+        self.attention_weights = None
+        self.mu_prev = None
+        self.init_layers()
+
+    def init_layers(self):
+        torch.nn.init.constant_(self.N_a[2].bias[(2*self.K):(3*self.K)], 1.)  # bias mean
+        torch.nn.init.constant_(self.N_a[2].bias[self.K:(2*self.K)], 10)  # bias std
+
+    def init_attention(self, inputs):
+        if self.J is None or inputs.shape[1]+1 > self.J.shape[-1]:
+            self.J = torch.arange(0, inputs.shape[1]+2.0).to(inputs.device) + 0.5
+        self.attention_weights = torch.zeros(inputs.shape[0], inputs.shape[1]).to(inputs.device)
+        self.mu_prev = torch.zeros(inputs.shape[0], self.K).to(inputs.device)
+        self.mask = None
+
+    def forward(self, inputs, query, t):
+        """
+        Shapes:
+            inputs: [B, T_in, C_encoder]
+            query: [B, C_attention_rnn]
+
+        :return: attention weights (B x 1 x T_max)
+        :rtype: torch.Tensor
+        """
+        if t == 0:
+            self.init_attention(inputs)
+        gbk_t = self.N_a(query)
+        gbk_t = gbk_t.view(gbk_t.size(0), -1, self.K)
+
+        # attention model parameters
+        # each B x K
+        g_t = gbk_t[:, 0, :]
+        b_t = gbk_t[:, 1, :]
+        k_t = gbk_t[:, 2, :]
+
+        # dropout to decorrelate attention heads
+        g_t = torch.nn.functional.dropout(g_t, p=0.5, training=self.training)
+
+        # attention GMM parameters
+        sig_t = torch.nn.functional.softplus(b_t) + self.eps
+
+        mu_t = self.mu_prev + torch.nn.functional.softplus(k_t)
+        g_t = torch.softmax(g_t, dim=-1) + self.eps
+
+        j = self.J[:inputs.size(1)+1]
+
+        # attention weights
+        phi_t = g_t.unsqueeze(-1) * (1 / (1 + torch.sigmoid((mu_t.unsqueeze(-1) - j) / sig_t.unsqueeze(-1))))
+
+        # discritize attention weights
+        alpha_t = torch.sum(phi_t, 1)
+        alpha_t = alpha_t[:, 1:] - alpha_t[:, :-1]
+        alpha_t[alpha_t == 0] = 1e-8
+
+        # import ipdb; ipdb.set_trace()
+        # apply masking
+        # if pad_mask is not None:
+        if self.mask is not None:
+            # self.mask = make_pad_mask(ilens).to(inputs.device)
+            alpha_t.data.masked_fill_(self.mask, self._mask_value)
+
+        # context = torch.bmm(alpha_t.unsqueeze(1), inputs).squeeze(1)
+        self.attention_weights = alpha_t
+        self.mu_prev = mu_t
+        # return context, alpha_t  # (B, T_in)
+        return alpha_t.unsqueeze(1)
+
+
+
 class Decoder(nn.Module):
     # Class variable because its value doesn't change between classes
     # yet ought to be scoped by class because its a property of a Decoder
     max_r = 20
-    def __init__(self, n_mels, decoder_dims, lstm_dims):
+    def __init__(self, n_mels, decoder_dims, lstm_dims, att_type, gmm_k=16):
         super().__init__()
         self.register_buffer('r', torch.tensor(1, dtype=torch.int))
         self.n_mels = n_mels
         self.prenet = PreNet(n_mels)
-        self.attn_net = LSA(decoder_dims)
+        self.att_type = att_type
+        if att_type == 'lsa':
+            self.attn_net = LSA(decoder_dims)
+        elif att_type == 'gmm':
+            self.attn_net = GravesAttention(decoder_dims, gmm_k)
+        else:
+            raise NotImplementedError(f"Don not support {att_type} attention module")
+
         self.attn_rnn = nn.GRUCell(decoder_dims + decoder_dims // 2, decoder_dims)
         self.rnn_input = nn.Linear(2 * decoder_dims, lstm_dims)
         self.res_rnn1 = nn.LSTMCell(lstm_dims, lstm_dims)
@@ -244,7 +343,11 @@ class Decoder(nn.Module):
         attn_hidden = self.attn_rnn(attn_rnn_in.squeeze(1), attn_hidden)
 
         # Compute the attention scores
+        # import ipdb; ipdb.set_trace()
         scores = self.attn_net(encoder_seq_proj, attn_hidden, t)
+        # [32, 78, 256] (B, T, H), [32, 256], t=0
+        # ipdb > scores.shape
+        # torch.Size([32, 1, T])
 
         # Dot product to create the context vector
         context_vec = scores @ encoder_seq
@@ -281,7 +384,7 @@ class Decoder(nn.Module):
 
 class Tacotron(nn.Module):
     def __init__(self, embed_dims, num_chars, encoder_dims, decoder_dims, n_mels, fft_bins, postnet_dims,
-                 encoder_K, lstm_dims, postnet_K, num_highways, dropout, stop_threshold):
+                 encoder_K, lstm_dims, postnet_K, num_highways, dropout, stop_threshold, att_type, gmm_k):
         super().__init__()
         self.n_mels = n_mels
         self.lstm_dims = lstm_dims
@@ -289,7 +392,7 @@ class Tacotron(nn.Module):
         self.encoder = Encoder(embed_dims, num_chars, encoder_dims,
                                encoder_K, num_highways, dropout)
         self.encoder_proj = nn.Linear(decoder_dims, decoder_dims, bias=False)
-        self.decoder = Decoder(n_mels, decoder_dims, lstm_dims)
+        self.decoder = Decoder(n_mels, decoder_dims, lstm_dims, att_type, gmm_k)
         self.postnet = CBHG(postnet_K, n_mels, postnet_dims, [256, 80], num_highways)
         self.post_proj = nn.Linear(postnet_dims * 2, fft_bins, bias=False)
 
@@ -316,8 +419,8 @@ class Tacotron(nn.Module):
             self.eval()
         else:
             self.train()
-
-        batch_size, _, steps  = m.size()
+        # import ipdb; ipdb.set_trace()  # x.size() = [32, 166]
+        batch_size, _, steps  = m.size()  # [32, 80, 735]
 
         # Initialise all hidden states and pack into tuple
         attn_hidden = torch.zeros(batch_size, self.decoder_dims, device=device)

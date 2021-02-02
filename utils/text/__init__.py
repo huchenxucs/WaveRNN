@@ -72,3 +72,9 @@ def _arpabet_to_sequence(text):
 
 def _should_keep_symbol(s):
   return s in _symbol_to_id and s is not '_' and s is not '~'
+
+
+if __name__ == '__main__':
+    my_cleaners = ['english_cleaners']
+    print(text_to_sequence("hello", my_cleaners))
+    print(_symbol_to_id)

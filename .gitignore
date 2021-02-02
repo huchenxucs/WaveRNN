@@ -6,6 +6,7 @@
 quick_start/
 LJSpeech-1.1/
 data/
+checkpoints/
 
 # Mac files
 .DS_Store
