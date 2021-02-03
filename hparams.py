@@ -94,5 +94,6 @@ tts_checkpoint_every = 2_000        # checkpoints the model every X steps
 
 tts_att_type = 'lsa'        # 'lsa' or 'gmm'
 tts_att_gmm_k = 16          # 只有在 tts_att_type = 'gmm' 时，才会起作用
+tts_num_workers = 4
 # ------------------------------------------------------------------------------------------------------------------#
 
